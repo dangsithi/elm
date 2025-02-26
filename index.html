@@ -3,17 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OBD2 ELM327 v1.0</title>
+    <title>OBD2 ELM327 v1.1</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; }
         button { margin: 5px; padding: 10px 15px; font-size: 16px; }
         canvas { max-width: 600px; margin: 20px auto; display: block; }
-        #logData { margin-top: 10px; }
     </style>
 </head>
 <body>
-    <h1>OBD2 ELM327 v1.0</h1>
+    <h1>OBD2 ELM327 v1.1</h1>
 
     <button onclick="connectOBD()">🔌 Kết nối</button>
     <button onclick="startLogging()">📊 Bắt đầu ghi log</button>
@@ -33,21 +32,13 @@
         let isLogging = false;
         let logData = [];
 
-        // Biểu đồ tốc độ & vòng tua
         const speedRpmCtx = document.getElementById('speedRpmChart').getContext('2d');
         const speedRpmChart = new Chart(speedRpmCtx, {
             type: 'line',
-            data: {
-                labels: [],
-                datasets: [
-                    { label: 'Tốc độ (km/h)', borderColor: 'blue', data: [], fill: false },
-                    { label: 'Vòng tua (RPM)', borderColor: 'red', data: [], fill: false }
-                ]
-            },
+            data: { labels: [], datasets: [{ label: 'Tốc độ (km/h)', borderColor: 'blue', data: [], fill: false }, { label: 'Vòng tua (RPM)', borderColor: 'red', data: [], fill: false }] },
             options: { responsive: true, scales: { x: { }, y: { beginAtZero: true } } }
         });
 
-        // Biểu đồ nhiệt độ nước làm mát
         const coolantCtx = document.getElementById('coolantTempChart').getContext('2d');
         const coolantChart = new Chart(coolantCtx, {
             type: 'line',
@@ -56,34 +47,53 @@
         });
 
         function connectOBD() {
-            socket = new WebSocket("ws://192.168.0.10:35000"); // Cổng mặc định ELM327 WiFi
-            socket.onopen = () => alert("✅ Đã kết nối với OBD2!");
-            socket.onmessage = event => processOBDData(event.data);
+            socket = new WebSocket("ws://192.168.0.10:35000");
+            socket.onopen = () => {
+                alert("✅ Đã kết nối với OBD2!");
+                requestOBDData();
+            };
             socket.onerror = () => alert("❌ Lỗi kết nối OBD2!");
             socket.onclose = () => alert("🔌 Mất kết nối OBD2!");
         }
 
-        function processOBDData(data) {
-            let speed = Math.floor(Math.random() * 100);  // Giả lập tốc độ
-            let rpm = Math.floor(Math.random() * 5000);   // Giả lập vòng tua
-            let coolantTemp = Math.floor(Math.random() * 100); // Giả lập nhiệt độ
+        function requestOBDData() {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send("010D\r"); // Lệnh lấy tốc độ
+                socket.send("010C\r"); // Lệnh lấy vòng tua
+                socket.send("0105\r"); // Lệnh lấy nhiệt độ nước làm mát
+            }
+        }
 
+        socket.onmessage = function(event) {
+            let response = event.data.trim();
             let time = new Date().toLocaleTimeString();
 
-            if (speedRpmChart.data.labels.length > 20) { speedRpmChart.data.labels.shift(); speedRpmChart.data.datasets[0].data.shift(); speedRpmChart.data.datasets[1].data.shift(); }
-            speedRpmChart.data.labels.push(time);
-            speedRpmChart.data.datasets[0].data.push(speed);
-            speedRpmChart.data.datasets[1].data.push(rpm);
-            speedRpmChart.update();
-
-            if (coolantChart.data.labels.length > 20) { coolantChart.data.labels.shift(); coolantChart.data.datasets[0].data.shift(); }
-            coolantChart.data.labels.push(time);
-            coolantChart.data.datasets[0].data.push(coolantTemp);
-            coolantChart.update();
-
-            if (isLogging) {
-                logData.push([time, speed, rpm, coolantTemp]);
+            if (response.includes("41 0D")) { // Tốc độ
+                let speed = parseInt(response.split(" ")[2], 16);
+                updateChart(speedRpmChart, time, speed, 0);
             }
+            if (response.includes("41 0C")) { // RPM
+                let rpm = parseInt(response.split(" ")[2] + response.split(" ")[3], 16) / 4;
+                updateChart(speedRpmChart, time, 0, rpm);
+            }
+            if (response.includes("41 05")) { // Nhiệt độ nước
+                let coolantTemp = parseInt(response.split(" ")[2], 16) - 40;
+                updateChart(coolantChart, time, coolantTemp);
+            }
+
+            if (isLogging) logData.push([time, speed, rpm, coolantTemp]);
+        };
+
+        function updateChart(chart, time, value1, value2 = null) {
+            if (chart.data.labels.length > 20) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+                if (value2 !== null) chart.data.datasets[1].data.shift();
+            }
+            chart.data.labels.push(time);
+            chart.data.datasets[0].data.push(value1);
+            if (value2 !== null) chart.data.datasets[1].data.push(value2);
+            chart.update();
         }
 
         function startLogging() {
@@ -106,11 +116,9 @@
             let now = new Date();
             let timestamp = now.getFullYear() + ("0" + (now.getMonth() + 1)).slice(-2) + ("0" + now.getDate()).slice(-2) + "_" +
                             ("0" + now.getHours()).slice(-2) + ("0" + now.getMinutes()).slice(-2) + ("0" + now.getSeconds()).slice(-2);
-
             let filename = `log_${timestamp}.csv`;
 
-            let csvContent = "data:text/csv;charset=utf-8,";
-            csvContent += "Thời gian,Tốc độ (km/h),Vòng tua (RPM),Nhiệt độ nước (°C)\n";
+            let csvContent = "data:text/csv;charset=utf-8,Thời gian,Tốc độ (km/h),Vòng tua (RPM),Nhiệt độ nước (°C)\n";
             logData.forEach(row => csvContent += row.join(",") + "\n");
 
             let encodedUri = encodeURI(csvContent);
@@ -124,14 +132,14 @@
 
         function readDTC() {
             if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send("03");  // Gửi lệnh đọc mã lỗi
+                socket.send("03\r");  // Gửi lệnh đọc mã lỗi
                 alert("📟 Đọc mã lỗi DTC...");
             }
         }
 
         function clearDTC() {
             if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send("04");  // Gửi lệnh xóa lỗi
+                socket.send("04\r");  // Gửi lệnh xóa lỗi
                 alert("❌ Đã xóa mã lỗi!");
             }
         }
