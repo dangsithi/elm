@@ -3,115 +3,75 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OBD2 ELM327 Web</title>
+    <title>OBD2 ELM327 Web v1.0</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; }
-        button { padding: 10px 15px; margin: 10px; font-size: 16px; }
-        #data { margin-top: 20px; font-size: 18px; }
-        canvas { max-width: 600px; margin: 20px auto; }
-        table { margin: auto; border-collapse: collapse; width: 80%; }
-        th, td { border: 1px solid black; padding: 8px; text-align: center; }
+        body { font-family: Arial, sans-serif; text-align: center; background: #222; color: white; }
+        button { padding: 10px; margin: 10px; background: limegreen; color: white; border: none; cursor: pointer; }
+        button:hover { background: darkgreen; }
+        .container { max-width: 800px; margin: auto; }
+        canvas { background: #fff; border-radius: 10px; }
+        footer { position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.7); padding: 5px 10px; border-radius: 5px; }
+        .dtc-list { background: red; padding: 5px; border-radius: 5px; display: inline-block; }
     </style>
 </head>
 <body>
-    <h1>🚗 OBD2 ELM327 Monitor</h1>
-    <button onclick="connectOBD()">🔌 Kết nối</button>
-    <button onclick="getRPM()">📊 RPM</button>
-    <button onclick="getSpeed()">🚀 Tốc độ</button>
-    <button onclick="getThrottle()">🛠️ Bướm ga</button>
-    <button onclick="readDTC()">⚠️ Đọc lỗi DTC</button>
-    <button onclick="clearDTC()">🗑️ Xóa lỗi</button>
-    <div id="data">💡 Dữ liệu sẽ hiển thị ở đây...</div>
 
-    <!-- Biểu đồ -->
-    <canvas id="chart"></canvas>
+    <h1>🚗 OBD2 ELM327 Monitor <span style="font-size: 18px; color: gray;">v1.0</span></h1>
+    <button onclick="startScan()">Bắt đầu quét</button>
+    <button onclick="clearDTC()">Xóa mã lỗi</button>
 
-    <!-- Bảng lưu log dữ liệu -->
-    <h2>📜 Log dữ liệu</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>Thời gian</th>
-                <th>RPM</th>
-                <th>Tốc độ (km/h)</th>
-            </tr>
-        </thead>
-        <tbody id="logData"></tbody>
-    </table>
+    <div class="container">
+        <h2>📊 Biểu đồ tốc độ & vòng tua</h2>
+        <canvas id="obdChart"></canvas>
+    </div>
+
+    <h2>⚠️ Mã lỗi DTC</h2>
+    <div id="dtcCodes" class="dtc-list">Không có lỗi</div>
+
+    <footer>OBD2 ELM327 Web v1.0</footer>
 
     <script>
-        let socket;
-        let rpmData = [], speedData = [], labels = [];
-        let chartCtx = document.getElementById("chart").getContext("2d");
-        
-        let chart = new Chart(chartCtx, {
-            type: 'line',
+        let speedData = [];
+        let rpmData = [];
+        let labels = [];
+        const ctx = document.getElementById("obdChart").getContext("2d");
+
+        const chart = new Chart(ctx, {
+            type: "line",
             data: {
                 labels: labels,
                 datasets: [
-                    { label: "RPM", borderColor: "red", data: rpmData, fill: false },
-                    { label: "Tốc độ (km/h)", borderColor: "blue", data: speedData, fill: false }
+                    { label: "Tốc độ (km/h)", borderColor: "blue", data: speedData, fill: false },
+                    { label: "Vòng tua (RPM)", borderColor: "red", data: rpmData, fill: false }
                 ]
-            },
-            options: { responsive: true, scales: { x: { display: true }, y: { beginAtZero: true } } }
+            }
         });
 
-        function connectOBD() {
-            socket = new WebSocket("ws://192.168.0.10:35000");
-            socket.onopen = () => { alert("✅ Đã kết nối OBD2!"); sendCommand("ATZ"); };
-            socket.onmessage = (event) => { handleData(event.data); };
-            socket.onerror = () => alert("❌ Lỗi kết nối!");
-            socket.onclose = () => alert("🔌 Mất kết nối!");
+        function startScan() {
+            fetch("http://192.168.0.10:35000/getData")
+            .then(response => response.json())
+            .then(data => {
+                const speed = data.speed || 0;
+                const rpm = data.rpm || 0;
+                speedData.push(speed);
+                rpmData.push(rpm);
+                labels.push(new Date().toLocaleTimeString());
+                chart.update();
+
+                document.getElementById("dtcCodes").innerText = data.dtc ? data.dtc.join(", ") : "Không có lỗi";
+            })
+            .catch(error => console.error("Lỗi kết nối:", error));
         }
 
-        function sendCommand(cmd) {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(cmd + "\r");
-            } else {
-                alert("⚠️ Chưa kết nối với ELM327!");
-            }
-        }
-
-        function getRPM() { sendCommand("010C"); }
-        function getSpeed() { sendCommand("010D"); }
-        function getThrottle() { sendCommand("0111"); }
-        function readDTC() { sendCommand("03"); }
-        function clearDTC() { sendCommand("04"); }
-
-        function handleData(data) {
-            document.getElementById("data").innerText = "📡 Nhận dữ liệu: " + data;
-            let time = new Date().toLocaleTimeString();
-
-            if (data.startsWith("41 0C")) { 
-                let rpm = parseInt(data.substring(6, 10), 16) / 4;
-                updateChart(time, rpm, null);
-                updateLog(time, rpm, null);
-            } 
-            else if (data.startsWith("41 0D")) { 
-                let speed = parseInt(data.substring(6, 8), 16);
-                updateChart(time, null, speed);
-                updateLog(time, null, speed);
-            }
-            else if (data.startsWith("43")) {
-                alert("⚠️ Mã lỗi DTC: " + data);
-            }
-            else if (data.startsWith("44")) {
-                alert("✅ Đã xóa lỗi thành công!");
-            }
-        }
-
-        function updateChart(time, rpm, speed) {
-            labels.push(time);
-            if (rpm !== null) rpmData.push(rpm);
-            if (speed !== null) speedData.push(speed);
-            chart.update();
-        }
-
-        function updateLog(time, rpm, speed) {
-            let row = `<tr><td>${time}</td><td>${rpm ?? "-"}</td><td>${speed ?? "-"}</td></tr>`;
-            document.getElementById("logData").innerHTML += row;
+        function clearDTC() {
+            fetch("http://192.168.0.10:35000/clearDTC")
+            .then(() => {
+                document.getElementById("dtcCodes").innerText = "Đã xóa lỗi";
+            })
+            .catch(error => console.error("Lỗi khi xóa DTC:", error));
         }
     </script>
+
 </body>
 </html>
