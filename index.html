@@ -3,105 +3,138 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OBD2 ELM327 Web v1.0</title>
+    <title>OBD2 ELM327 v1.0</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; background: #222; color: white; }
-        button { padding: 10px; margin: 10px; background: limegreen; color: white; border: none; cursor: pointer; }
-        button:hover { background: darkgreen; }
-        .container { max-width: 800px; margin: auto; }
-        canvas { background: #fff; border-radius: 10px; }
-        footer { position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.7); padding: 5px 10px; border-radius: 5px; }
-        .dtc-list { background: red; padding: 5px; border-radius: 5px; display: inline-block; }
+        body { font-family: Arial, sans-serif; text-align: center; }
+        button { margin: 5px; padding: 10px 15px; font-size: 16px; }
+        canvas { max-width: 600px; margin: 20px auto; display: block; }
+        #logData { margin-top: 10px; }
     </style>
 </head>
 <body>
+    <h1>OBD2 ELM327 v1.0</h1>
 
-    <h1>🚗 OBD2 ELM327 Monitor <span style="font-size: 18px; color: gray;">v1.0</span></h1>
+    <button onclick="connectOBD()">🔌 Kết nối</button>
+    <button onclick="startLogging()">📊 Bắt đầu ghi log</button>
+    <button onclick="stopLogging()">⏹ Dừng ghi log</button>
+    <button onclick="saveLogData()">💾 Lưu dữ liệu</button>
+    <button onclick="readDTC()">📟 Đọc lỗi DTC</button>
+    <button onclick="clearDTC()">❌ Xóa lỗi</button>
 
-    <button onclick="connectELM327()">🔌 Kết nối ELM327</button>
-    <button onclick="startScan()">📡 Bắt đầu quét</button>
-    <button onclick="saveData()">💾 Lưu dữ liệu</button>
-    <button onclick="clearDTC()">⚠️ Xóa mã lỗi</button>
+    <h2>Biểu đồ tốc độ & vòng tua</h2>
+    <canvas id="speedRpmChart"></canvas>
 
-    <div class="container">
-        <h2>📊 Biểu đồ tốc độ, vòng tua & nhiệt độ</h2>
-        <canvas id="obdChart"></canvas>
-    </div>
-
-    <h2>⚠️ Mã lỗi DTC</h2>
-    <div id="dtcCodes" class="dtc-list">Không có lỗi</div>
-
-    <footer>OBD2 ELM327 Web v1.0</footer>
+    <h2>Biểu đồ nhiệt độ nước làm mát</h2>
+    <canvas id="coolantTempChart"></canvas>
 
     <script>
-        let speedData = [];
-        let rpmData = [];
-        let coolantTempData = [];
-        let labels = [];
-        let logData = []; 
-        const ctx = document.getElementById("obdChart").getContext("2d");
+        let socket;
+        let isLogging = false;
+        let logData = [];
 
-        const chart = new Chart(ctx, {
-            type: "line",
+        // Biểu đồ tốc độ & vòng tua
+        const speedRpmCtx = document.getElementById('speedRpmChart').getContext('2d');
+        const speedRpmChart = new Chart(speedRpmCtx, {
+            type: 'line',
             data: {
-                labels: labels,
+                labels: [],
                 datasets: [
-                    { label: "Tốc độ (km/h)", borderColor: "blue", data: speedData, fill: false },
-                    { label: "Vòng tua (RPM)", borderColor: "red", data: rpmData, fill: false },
-                    { label: "Nhiệt độ nước (°C)", borderColor: "orange", data: coolantTempData, fill: false }
+                    { label: 'Tốc độ (km/h)', borderColor: 'blue', data: [], fill: false },
+                    { label: 'Vòng tua (RPM)', borderColor: 'red', data: [], fill: false }
                 ]
-            }
+            },
+            options: { responsive: true, scales: { x: { }, y: { beginAtZero: true } } }
         });
 
-        function connectELM327() {
-            fetch("http://192.168.0.10:35000/connect")
-            .then(response => response.json())
-            .then(data => {
-                alert(data.status === "connected" ? "✅ Kết nối thành công!" : "❌ Kết nối thất bại!");
-            })
-            .catch(error => alert("❌ Lỗi kết nối!"));
+        // Biểu đồ nhiệt độ nước làm mát
+        const coolantCtx = document.getElementById('coolantTempChart').getContext('2d');
+        const coolantChart = new Chart(coolantCtx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: 'Nhiệt độ nước (°C)', borderColor: 'green', data: [], fill: false }] },
+            options: { responsive: true, scales: { x: { }, y: { beginAtZero: true } } }
+        });
+
+        function connectOBD() {
+            socket = new WebSocket("ws://192.168.0.10:35000"); // Cổng mặc định ELM327 WiFi
+            socket.onopen = () => alert("✅ Đã kết nối với OBD2!");
+            socket.onmessage = event => processOBDData(event.data);
+            socket.onerror = () => alert("❌ Lỗi kết nối OBD2!");
+            socket.onclose = () => alert("🔌 Mất kết nối OBD2!");
         }
 
-        function startScan() {
-            fetch("http://192.168.0.10:35000/getData")
-            .then(response => response.json())
-            .then(data => {
-                const speed = data.speed || 0;
-                const rpm = data.rpm || 0;
-                const coolantTemp = data.coolantTemp || 0;
-                const time = new Date().toLocaleTimeString();
+        function processOBDData(data) {
+            let speed = Math.floor(Math.random() * 100);  // Giả lập tốc độ
+            let rpm = Math.floor(Math.random() * 5000);   // Giả lập vòng tua
+            let coolantTemp = Math.floor(Math.random() * 100); // Giả lập nhiệt độ
 
-                speedData.push(speed);
-                rpmData.push(rpm);
-                coolantTempData.push(coolantTemp);
-                labels.push(time);
-                logData.push(`${time},${speed},${rpm},${coolantTemp}`);
+            let time = new Date().toLocaleTimeString();
 
-                chart.update();
+            if (speedRpmChart.data.labels.length > 20) { speedRpmChart.data.labels.shift(); speedRpmChart.data.datasets[0].data.shift(); speedRpmChart.data.datasets[1].data.shift(); }
+            speedRpmChart.data.labels.push(time);
+            speedRpmChart.data.datasets[0].data.push(speed);
+            speedRpmChart.data.datasets[1].data.push(rpm);
+            speedRpmChart.update();
 
-                document.getElementById("dtcCodes").innerText = data.dtc ? data.dtc.join(", ") : "Không có lỗi";
-            })
-            .catch(error => console.error("Lỗi kết nối:", error));
+            if (coolantChart.data.labels.length > 20) { coolantChart.data.labels.shift(); coolantChart.data.datasets[0].data.shift(); }
+            coolantChart.data.labels.push(time);
+            coolantChart.data.datasets[0].data.push(coolantTemp);
+            coolantChart.update();
+
+            if (isLogging) {
+                logData.push([time, speed, rpm, coolantTemp]);
+            }
         }
 
-        function saveData() {
-            let csvContent = "Thời gian,Tốc độ (km/h),Vòng tua (RPM),Nhiệt độ nước (°C)\n" + logData.join("\n");
-            let blob = new Blob([csvContent], { type: "text/csv" });
+        function startLogging() {
+            isLogging = true;
+            logData = [];
+            alert("📊 Bắt đầu ghi log dữ liệu!");
+        }
+
+        function stopLogging() {
+            isLogging = false;
+            alert("⏹ Dừng ghi log!");
+        }
+
+        function saveLogData() {
+            if (logData.length === 0) {
+                alert("⛔ Không có dữ liệu để lưu!");
+                return;
+            }
+
+            let now = new Date();
+            let timestamp = now.getFullYear() + ("0" + (now.getMonth() + 1)).slice(-2) + ("0" + now.getDate()).slice(-2) + "_" +
+                            ("0" + now.getHours()).slice(-2) + ("0" + now.getMinutes()).slice(-2) + ("0" + now.getSeconds()).slice(-2);
+
+            let filename = `log_${timestamp}.csv`;
+
+            let csvContent = "data:text/csv;charset=utf-8,";
+            csvContent += "Thời gian,Tốc độ (km/h),Vòng tua (RPM),Nhiệt độ nước (°C)\n";
+            logData.forEach(row => csvContent += row.join(",") + "\n");
+
+            let encodedUri = encodeURI(csvContent);
             let link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = "OBD2_Log.csv";
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", filename);
+            document.body.appendChild(link);
             link.click();
+            document.body.removeChild(link);
+        }
+
+        function readDTC() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send("03");  // Gửi lệnh đọc mã lỗi
+                alert("📟 Đọc mã lỗi DTC...");
+            }
         }
 
         function clearDTC() {
-            fetch("http://192.168.0.10:35000/clearDTC")
-            .then(() => {
-                document.getElementById("dtcCodes").innerText = "Đã xóa lỗi";
-            })
-            .catch(error => console.error("Lỗi khi xóa DTC:", error));
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send("04");  // Gửi lệnh xóa lỗi
+                alert("❌ Đã xóa mã lỗi!");
+            }
         }
     </script>
-
 </body>
 </html>
