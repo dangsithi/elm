@@ -18,11 +18,14 @@
 <body>
 
     <h1>🚗 OBD2 ELM327 Monitor <span style="font-size: 18px; color: gray;">v1.0</span></h1>
-    <button onclick="startScan()">Bắt đầu quét</button>
-    <button onclick="clearDTC()">Xóa mã lỗi</button>
+
+    <button onclick="connectELM327()">🔌 Kết nối ELM327</button>
+    <button onclick="startScan()">📡 Bắt đầu quét</button>
+    <button onclick="saveData()">💾 Lưu dữ liệu</button>
+    <button onclick="clearDTC()">⚠️ Xóa mã lỗi</button>
 
     <div class="container">
-        <h2>📊 Biểu đồ tốc độ & vòng tua</h2>
+        <h2>📊 Biểu đồ tốc độ, vòng tua & nhiệt độ</h2>
         <canvas id="obdChart"></canvas>
     </div>
 
@@ -34,7 +37,9 @@
     <script>
         let speedData = [];
         let rpmData = [];
+        let coolantTempData = [];
         let labels = [];
+        let logData = []; 
         const ctx = document.getElementById("obdChart").getContext("2d");
 
         const chart = new Chart(ctx, {
@@ -43,10 +48,20 @@
                 labels: labels,
                 datasets: [
                     { label: "Tốc độ (km/h)", borderColor: "blue", data: speedData, fill: false },
-                    { label: "Vòng tua (RPM)", borderColor: "red", data: rpmData, fill: false }
+                    { label: "Vòng tua (RPM)", borderColor: "red", data: rpmData, fill: false },
+                    { label: "Nhiệt độ nước (°C)", borderColor: "orange", data: coolantTempData, fill: false }
                 ]
             }
         });
+
+        function connectELM327() {
+            fetch("http://192.168.0.10:35000/connect")
+            .then(response => response.json())
+            .then(data => {
+                alert(data.status === "connected" ? "✅ Kết nối thành công!" : "❌ Kết nối thất bại!");
+            })
+            .catch(error => alert("❌ Lỗi kết nối!"));
+        }
 
         function startScan() {
             fetch("http://192.168.0.10:35000/getData")
@@ -54,14 +69,29 @@
             .then(data => {
                 const speed = data.speed || 0;
                 const rpm = data.rpm || 0;
+                const coolantTemp = data.coolantTemp || 0;
+                const time = new Date().toLocaleTimeString();
+
                 speedData.push(speed);
                 rpmData.push(rpm);
-                labels.push(new Date().toLocaleTimeString());
+                coolantTempData.push(coolantTemp);
+                labels.push(time);
+                logData.push(`${time},${speed},${rpm},${coolantTemp}`);
+
                 chart.update();
 
                 document.getElementById("dtcCodes").innerText = data.dtc ? data.dtc.join(", ") : "Không có lỗi";
             })
             .catch(error => console.error("Lỗi kết nối:", error));
+        }
+
+        function saveData() {
+            let csvContent = "Thời gian,Tốc độ (km/h),Vòng tua (RPM),Nhiệt độ nước (°C)\n" + logData.join("\n");
+            let blob = new Blob([csvContent], { type: "text/csv" });
+            let link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "OBD2_Log.csv";
+            link.click();
         }
 
         function clearDTC() {
