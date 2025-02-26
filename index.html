@@ -1,40 +1,116 @@
 <!DOCTYPE html>
-<html>
+<html lang="vi">
 <head>
-    <title>OBD2 ELM327 WiFi</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OBD2 ELM327 Web</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; }
-        #output { white-space: pre-wrap; text-align: left; background: #eee; padding: 10px; }
-        button { margin: 5px; padding: 10px; }
+        button { padding: 10px 15px; margin: 10px; font-size: 16px; }
+        #data { margin-top: 20px; font-size: 18px; }
+        canvas { max-width: 600px; margin: 20px auto; }
+        table { margin: auto; border-collapse: collapse; width: 80%; }
+        th, td { border: 1px solid black; padding: 8px; text-align: center; }
     </style>
 </head>
 <body>
-    <h1>OBD2 ELM327 WiFi Scanner</h1>
-    <button onclick="connectOBD2()">Kết nối OBD2</button>
-    <button onclick="getOBDData()">Lấy dữ liệu</button>
-    <div id="output">Kết quả sẽ hiển thị ở đây...</div>
+    <h1>🚗 OBD2 ELM327 Monitor</h1>
+    <button onclick="connectOBD()">🔌 Kết nối</button>
+    <button onclick="getRPM()">📊 RPM</button>
+    <button onclick="getSpeed()">🚀 Tốc độ</button>
+    <button onclick="getThrottle()">🛠️ Bướm ga</button>
+    <button onclick="readDTC()">⚠️ Đọc lỗi DTC</button>
+    <button onclick="clearDTC()">🗑️ Xóa lỗi</button>
+    <div id="data">💡 Dữ liệu sẽ hiển thị ở đây...</div>
+
+    <!-- Biểu đồ -->
+    <canvas id="chart"></canvas>
+
+    <!-- Bảng lưu log dữ liệu -->
+    <h2>📜 Log dữ liệu</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Thời gian</th>
+                <th>RPM</th>
+                <th>Tốc độ (km/h)</th>
+            </tr>
+        </thead>
+        <tbody id="logData"></tbody>
+    </table>
 
     <script>
         let socket;
+        let rpmData = [], speedData = [], labels = [];
+        let chartCtx = document.getElementById("chart").getContext("2d");
+        
+        let chart = new Chart(chartCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    { label: "RPM", borderColor: "red", data: rpmData, fill: false },
+                    { label: "Tốc độ (km/h)", borderColor: "blue", data: speedData, fill: false }
+                ]
+            },
+            options: { responsive: true, scales: { x: { display: true }, y: { beginAtZero: true } } }
+        });
 
-        function connectOBD2() {
+        function connectOBD() {
             socket = new WebSocket("ws://192.168.0.10:35000");
-            socket.onopen = () => document.getElementById("output").innerText = "🔌 Đã kết nối với OBD2!";
-            socket.onerror = () => document.getElementById("output").innerText = "⚠️ Lỗi kết nối!";
-            socket.onmessage = (event) => document.getElementById("output").innerText += "\n" + event.data;
+            socket.onopen = () => { alert("✅ Đã kết nối OBD2!"); sendCommand("ATZ"); };
+            socket.onmessage = (event) => { handleData(event.data); };
+            socket.onerror = () => alert("❌ Lỗi kết nối!");
+            socket.onclose = () => alert("🔌 Mất kết nối!");
         }
 
-        function sendOBDCommand(cmd) {
+        function sendCommand(cmd) {
             if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(cmd + "\r");
             } else {
-                alert("Chưa kết nối với OBD2!");
+                alert("⚠️ Chưa kết nối với ELM327!");
             }
         }
 
-        function getOBDData() {
-            let commands = ["010C", "010D", "0105", "010F", "0110"]; // RPM, Speed, Coolant Temp, Intake Temp, MAF
-            commands.forEach((cmd, index) => setTimeout(() => sendOBDCommand(cmd), index * 1000));
+        function getRPM() { sendCommand("010C"); }
+        function getSpeed() { sendCommand("010D"); }
+        function getThrottle() { sendCommand("0111"); }
+        function readDTC() { sendCommand("03"); }
+        function clearDTC() { sendCommand("04"); }
+
+        function handleData(data) {
+            document.getElementById("data").innerText = "📡 Nhận dữ liệu: " + data;
+            let time = new Date().toLocaleTimeString();
+
+            if (data.startsWith("41 0C")) { 
+                let rpm = parseInt(data.substring(6, 10), 16) / 4;
+                updateChart(time, rpm, null);
+                updateLog(time, rpm, null);
+            } 
+            else if (data.startsWith("41 0D")) { 
+                let speed = parseInt(data.substring(6, 8), 16);
+                updateChart(time, null, speed);
+                updateLog(time, null, speed);
+            }
+            else if (data.startsWith("43")) {
+                alert("⚠️ Mã lỗi DTC: " + data);
+            }
+            else if (data.startsWith("44")) {
+                alert("✅ Đã xóa lỗi thành công!");
+            }
+        }
+
+        function updateChart(time, rpm, speed) {
+            labels.push(time);
+            if (rpm !== null) rpmData.push(rpm);
+            if (speed !== null) speedData.push(speed);
+            chart.update();
+        }
+
+        function updateLog(time, rpm, speed) {
+            let row = `<tr><td>${time}</td><td>${rpm ?? "-"}</td><td>${speed ?? "-"}</td></tr>`;
+            document.getElementById("logData").innerHTML += row;
         }
     </script>
 </body>
