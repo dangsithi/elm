@@ -1,1 +1,41 @@
-<!DOCTYPE html><html><head><title>Test Page</title></head><body><h1>Hello, GitHub Pages!</h1></body></html>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OBD2 ELM327 WiFi</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        #output { white-space: pre-wrap; text-align: left; background: #eee; padding: 10px; }
+        button { margin: 5px; padding: 10px; }
+    </style>
+</head>
+<body>
+    <h1>OBD2 ELM327 WiFi Scanner</h1>
+    <button onclick="connectOBD2()">Kết nối OBD2</button>
+    <button onclick="getOBDData()">Lấy dữ liệu</button>
+    <div id="output">Kết quả sẽ hiển thị ở đây...</div>
+
+    <script>
+        let socket;
+
+        function connectOBD2() {
+            socket = new WebSocket("ws://192.168.0.10:35000");
+            socket.onopen = () => document.getElementById("output").innerText = "🔌 Đã kết nối với OBD2!";
+            socket.onerror = () => document.getElementById("output").innerText = "⚠️ Lỗi kết nối!";
+            socket.onmessage = (event) => document.getElementById("output").innerText += "\n" + event.data;
+        }
+
+        function sendOBDCommand(cmd) {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(cmd + "\r");
+            } else {
+                alert("Chưa kết nối với OBD2!");
+            }
+        }
+
+        function getOBDData() {
+            let commands = ["010C", "010D", "0105", "010F", "0110"]; // RPM, Speed, Coolant Temp, Intake Temp, MAF
+            commands.forEach((cmd, index) => setTimeout(() => sendOBDCommand(cmd), index * 1000));
+        }
+    </script>
+</body>
+</html>
